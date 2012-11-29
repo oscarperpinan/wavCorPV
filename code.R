@@ -1,3 +1,26 @@
+##################################################################
+## Source code for the paper: "Time dependent correlation between AC
+## power fluctuations time series from a network of DC/AC inverters
+## in a large PV plant"
+
+## Copyright (C) 2012 Oscar Perpiñán Lamigueiro
+
+## This program is free software you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published
+## by the Free Software Foundation; either version 2 of the License,
+## or (at your option) any later version.
+   
+## This program is distributed in the hope that it will be useful, but
+## WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+## General Public License for more details.
+
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, write to the Free Software
+## Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
+## 02111-1307, USA.
+####################################################################
+
 library(lattice)
 library(latticeExtra)
 library(parallel)
@@ -7,31 +30,41 @@ library(cluster)
 library(car)
 library(zoo)
 
+## Change to the folder where the local copy is located. The data
+## folder of the GitHub repository contains three files of
+## intermediate results: meteo.RData (clustering), wavCorDF.RData and
+## corDistLong.RData (wavelet correlation). With these three files
+## most of the figures can be reproduced. Due to large size and
+## confidential information requirements, the full collection of data
+## can not be published. Sample data is available from the authors
+## upon request.
+setwd('~/Investigacion/DocsPropios/Moura/R')
+
 ################################################################################
 ## FUNCTIONS
 ################################################################################
 
 ## Clean a time series
-no0 <- function(x, threshold=0.1){ ##devuelve el índice de muestras por encima de threshold
+no0 <- function(x, threshold=0.1){
   idx <- seq_along(x)
   len=length(x)
-  mx=max(abs(x), na.rm=TRUE)          ##máximo valor de la señal
-  thr=mx*threshold        ##umbral para considerar ruido
-  xrle <- rle(abs(x)>thr) ##tramos en los que la señal supera el umbral
-  xrle.len <- xrle$lengths  ##longitud de cada tramo
-  xrle.value <- xrle$values ##valores en cada tramo
-  n=length(xrle.value)      ##cuantos tramos
+  mx=max(abs(x), na.rm=TRUE)      ## maximum value
+  thr=mx*threshold        ## noise threshold
+  xrle <- rle(abs(x)>thr) ## parts of the signal above the threshold
+  xrle.len <- xrle$lengths  ##lengths of these parts
+  xrle.value <- xrle$values 
+  n=length(xrle.value)      ## number of parts
 
-  hd <- 1:xrle.len[1]         ##cabecera de la señal
-  tl <- (len-xrle.len[n]):len ##cola de la señal
+  hd <- 1:xrle.len[1]         ##head of the signal
+  tl <- (len-xrle.len[n]):len ##tail of the signal
   
   if(!xrle.value[1] & !xrle.value[n]) {
-    idx[-c(hd, tl)] ##elimino cabeza y cola porque no superan umbral
+    idx[-c(hd, tl)] ## head and tail are below the threshold, suppressed.
   } else if(!xrle.value[1] & xrle.value[n]) {
-    return(idx[-hd]) ##solo elimino cabeza, porque la cola sí supera el umbral
+    return(idx[-hd]) ## head below threshold, suppressed.
   } else if(xrle.value[1] & !xrle.value[n]) {
-    return(idx[-tl]) ##elimino cola, porque la cabeza si supera el umbral
-  } else return(idx) ##entrego la señal sin modificar (comienzo y final están por encima del umbral)
+    return(idx[-tl]) ## tail below threshold, suppressed.
+  } else return(idx) ## unmodified
 }
 
 ## wavelet variance
@@ -67,7 +100,6 @@ modwt <- function(x, ...){
   }
 
 correlogram <- function(x, scales=list(cex=0.5, x=list(rot=90)), par.settings=BTCTheme, ...){
-  ## pag.108 Libro Lattice
   ord <- order.dendrogram(as.dendrogram(hclust(dist(x))))
   levelplot(x[ord, ord], scales=scales, xlab='', ylab='',
             par.settings=par.settings, ...)
@@ -77,21 +109,21 @@ correlogram <- function(x, scales=list(cex=0.5, x=list(rot=90)), par.settings=BT
 ## WAVELET CORRELATION
 ################################################################################
 
-## change to the folder where data is available
-## Sample data is available from the authors upon request
-old <- setwd('datos/')
+## Change to the folder where data is available. Sample data is
+## available from the authors upon request
+old <- setwd('data/')
 
 inverters <- read.csv2('coord_reticulas.csv')
 
-## Distancias entre inversores
+## Distances between inverters
 distances <- as.vector(dist(inverters[,2:3]))
 
-## Etiquetas de las posibles combinaciones
+## Labels of combinations between inverters
 labels <- inverters$reticula
 ids <- outer(labels, labels, paste, sep='_')
-ids <- ids[lower.tri(ids)] ##sólo combinaciones sin repetición
+ids <- ids[lower.tri(ids)] ## drop repetitions
 
-## angulo entre cada inversor (radianes positivos)
+## Angle between inverters (positive radians)
 x <- inverters[,2]
 xx <- outer(x, x, function(x, y)abs(x-y))
 y <- inverters[,3]
@@ -103,6 +135,7 @@ az <- as.vector(az[lower.tri(az)])
 fechas <- seq(as.Date('2010/06/15'), as.Date('2011/12/15'), by='1 day')
 
 for (d in seq_along(fechas)){
+  ## Open the correspondent file
   fecha <- fechas[d]
   print(fecha)
   ips <- paste('192.168.26', 16:18, sep='.')
@@ -121,12 +154,12 @@ for (d in seq_along(fechas)){
                                            header=TRUE, sep=','))
 
 
-    power <- do.call(cbind, lapply(z, function(x){ ##potencia a la salida de cada inversor
+    power <- do.call(cbind, lapply(z, function(x){ ## Inverter power
       idCols <- grep('Potencia', names(x))
-      variadores <- x[ ,idCols] ##cada inversor está compuesto por 4 variadores
+      variadores <- x[ ,idCols] ##Each inverter contains 4 parts
       labels <- substr(names(variadores), 9, 10)
       groups <- split(1:ncol(variadores), labels)
-      invPower <- sapply(groups, ##suma los variadores de cada inversor
+      invPower <- sapply(groups, ##The total power is the sum of the parts
                          function(cols)rowSums(variadores[,cols]))
       res <- zoo(invPower, index(x))
     }))
@@ -136,13 +169,10 @@ for (d in seq_along(fechas)){
     outlier <- which(powerClean>600) ## | power<=0 )
     powerClean[outlier] <- NA
 
-    ## Descomposición wavelet para cada inversor
-    ## modwtPower es una lista: cada componente es un zoo que contiene
-    ## la señal y sus coeficientes wavelet (en cada columna)
+    ## MODWT for each inverter modwtPower is a list: each component is
+    ## a zoo object with the signal and the wavelet coefficients
     modwtPower <- lapply(powerClean, modwt)
-    ##atención: los inversores no siempre llevan el mismo orden en los ficheros
-    ## que el especificado en inverters$labels
-    ##Para poder usar distances y az debo reordenar
+    ## Reorder inverters according to inverters$labels to use safely distances and az
     idxSort <- order(names(modwtPower))
     modwtPower <- modwtPower[idxSort]
     delta <- 1/frequency(powerClean)
@@ -151,8 +181,8 @@ for (d in seq_along(fechas)){
     nLevels <- 9
     scales <- paste('d', seq_len(nLevels), sep='')
 
-    ## wavDetail es una lista: cada componente es un zoo con los coeficientes
-    ## correspondientes a una escala wavelet para cada inversor
+    ## wavDetail is a list: each component is a zoo with the wavelet
+    ## coefficients of each scale for each inverter
     wavDetail <- list() 
     for (s in scales){
       wavDetail[[s]] <- do.call(cbind, lapply(modwtPower, function(x)x[,s]))
@@ -162,7 +192,7 @@ for (d in seq_along(fechas)){
     names(wavCor) <- scales
 
 
-    ##corDist es un data.frame con la correlación wavelet correspondiente a cada escala.
+    ##corDist is a data.frame with the wavelet correlation for each scale
     correlation <- sapply(wavCor, function(x)x[lower.tri(x)])
     corDist <- as.data.frame(cbind(correlation, distances, az))
     corDist$ids <- ids
@@ -178,9 +208,9 @@ for (d in seq_along(fechas)){
   })
 }
 
+setwd(old)
 
-
-##confidence intervals
+## Confidence intervals
 s <- 1:9 ##scales
 at <- seq(0, 1, .1) ##correlation values
 N <- dim(powerClean)[1] ##number of samples
@@ -198,6 +228,7 @@ g <- with(g,{
           data.frame(at, scale, Nhat, q, lower, higher, int)
           })
 
+## Figure 2
 contourplot(int~scale*at, data=g,
             cut=35, lwd=0.4, labels=list(cex=0.7),
             xlab='Wavelet scale', ylab='Wavelet correlation')
@@ -205,13 +236,17 @@ contourplot(int~scale*at, data=g,
 ################################################################################
 ## CLUSTERING
 ################################################################################
+## Latitude of the plant
 lat=38.2
 
-## change to the folder where data is available
-old <- setwd('datos/')
-
-## change to sequence of available dates
+## Available dates
 fechas <- seq(as.Date('2010/06/15'), as.Date('2011/12/15'), by='1 day')
+
+##The result of this section is available with
+## load('data/meteo.RData')
+
+## change to the folder where data is available.
+old <- setwd('data/')
 
 meteo <- mclapply(fechas, function(fecha){
   print(fecha)
@@ -257,8 +292,6 @@ meteo <- do.call(rbind, meteo)
 meteoZ <- zoo(meteo, as.Date(fechasOK))
 names(meteoZ) <- c('G0d', 'ktd', paste('wavVar', 1:10, sep=''), 'minWind', 'maxWind', 'meanWind')
 
-
-
 ## Clustering procedure
 
 foo <- function(x){
@@ -266,8 +299,8 @@ foo <- function(x){
   res <- bcPower(x, coef(lambda))
 }
 
-
-trans <- lapply(meteoZ[,-13], foo)
+## Drop Minimum Wind Speed 
+trans <- lapply(subset(meteoZ, select=-minWind), foo)
 trans <- as.data.frame(trans)
 
 densityplot(as.formula(paste('~', paste(names(trans), collapse='+'), sep='')), data=trans,
@@ -286,11 +319,27 @@ splom(trans,
       },
       pscale=0, varname.cex=0.7)
 
+## Three clusters, PAM method 
 nCl=3
-pamMeteo <- pam(trans[,-c(1, 13, 14)], nCl)##, stand=TRUE)##metric='manhattan')
+## 1=Low, 2=High, 3=Med
 
-plot(silhouette(pamMeteo))
+## With maxWind and meanWind
+pamMeteo0 <- pam(subset(trans, select=-c(G0d)), nCl, stand=TRUE)
+silh0 <- silhouette(pamMeteo0)
+summary(silh0)$clus.avg.widths
 
+plot(silh0, main='', col=brewer.pal(n=3, name='Dark2'))
+
+## without G0d, maxWind and meanWind
+pamMeteo1 <- pam(subset(trans, select=-c(G0d, maxWind, meanWind)), nCl, stand=TRUE)
+
+silh1 <- silhouette(pamMeteo1)
+summary(silh1)$clus.avg.widths
+
+plot(silh1, main='', col=brewer.pal(n=3, name='Dark2'))
+
+## We choose cluster without wind
+pamMeteo <- pamMeteo1
 
 meteoZ$cluster <- pamMeteo$clustering
 trans$cluster <- pamMeteo$clustering
@@ -300,34 +349,53 @@ form <- as.formula(paste('ktd', wavVars, sep='~'))
 xyplot(form, data=trans, groups=cluster, auto.key=list(space='right'),
        cex=0.5, alpha=0.5, xlab='')
 
+##inspired from https://stat.ethz.ch/pipermail/r-help/2006-April/104068.html
+strip.variance <- function(which.given, which.panel, var.name, 
+                       factor.levels, ...) {
+  expr <- paste("nu[G(0)](lambda[", substr(factor.levels, 7, 8), "])", sep='', collapse=',')
+  expr <- paste("expression(", expr, ")", sep = "")
+  fl <- eval(parse(text = expr))
+  strip.default(which.given, which.panel, var.name, fl, ...)
+}
 
+## Figure 5
 form <- as.formula(paste('~', wavVars, sep=''))
 densityplot(form, data=trans, groups=cluster,
             auto.key=list(corner=c(x=0.6, y=0), text=c('Low', 'High', 'Medium')),
             scales=list(y=list(relation='free'),
               x=list(relation='free')),
+            strip=strip.variance,
             xlab='')
 
+## Figure 4
 nc <- ncol(trans)
 splom(trans[,-nc], groups=trans$cluster,
       auto.key=list(space='right', text=c('Low', 'High', 'Medium')),
-      cex=0.3, alpha=0.3, xlab='',
+      cex=0.2, alpha=0.3, xlab='',
       varname.cex=0.6, pscale=0,
-      diag.panel = function(x, ...){
+      diag.panel = function(x, varname, ...){
         yrng <- current.panel.limits()$ylim
         d <- density(x, na.rm=TRUE)
         d$y <- with(d, yrng[1] + 0.95 * diff(yrng) * y / max(y) )
-        panel.lines(d)
-        diag.panel.splom(x, ...)
+        panel.lines(d, col='lightgray')
+        if (grepl('wavVar', varname)) {
+          s <- substr(varname, 7, 8)
+          varname <- paste("expression(nu(lambda[", s, "]))", sep='')
+          varname <- eval(parse(text = varname))
+          }
+        diag.panel.splom(x, varname,...)
       }
       )
 
-xyplot(ktd~wavVar1, data=trans, groups=cluster) + glayer(panel.rug(..., col='gray'))
+##################################################################
+## WAVELET CORRELATION
+##################################################################
 
-
+## The results of this section is available with
+## load('data/wavCorDF.RData')
+## load('data/corDistLong.RData')
 
 ## Days from each cluster
-
 leeZ <- function(d){
   ips <- paste('192.168.26', 16:18, sep='.')
   fechaFormat <- format(d, '%d%m%Y')
@@ -355,8 +423,9 @@ d1 <- as.Date('2011-11-19')## Low
 d2 <- as.Date('2011-06-04')## High
 d3 <- as.Date('2011-04-11')## Medium
 
-## change to the folder where data is available
-old <- setwd('datos/')
+## Change to the folder where data is available. Sample data is
+## available from the authors upon request.
+old <- setwd('data/')
 rad1 <- leeZ(d1)
 rad2 <- leeZ(d2)
 rad3 <- leeZ(d3)
@@ -380,6 +449,7 @@ mathLabs <- function(x){
   }
 scaleLabs <- mathLabs(maxFluc$scale)
 
+## Figure 7
 dotplot(scale ~ Low + High + Med, data=maxFluc,
         type='o', xlab='Maximum fluctuation (%)',
         scales=list(y=list(labels=eval(parse(text=scaleLabs))))) +
@@ -406,8 +476,6 @@ load(paste(d3,'.RData', sep=''))
 wavCorMed <- wavCor
 corDistLongMed <- corDistLong
 
-
-
 toDF <- function(i, lista){
   x <- lista[[i]]
   ord <- order.dendrogram(as.dendrogram(hclust(dist(x))))
@@ -430,6 +498,9 @@ wavCorHighDF$level <- 'High'
 wavCorDF <- rbind(wavCorLowDF, wavCorMedDF, wavCorHighDF)
 wavCorDF$level <- factor(wavCorDF$level, levels=c('Low', 'Med', 'High'))
 
+## Next figures can be produced with:
+## load('data/wavCorDF.RData')
+## load('data/corDistLong.RData')
 
 ##inspired from https://stat.ethz.ch/pipermail/r-help/2006-April/104068.html
 strip.math <- function(which.given, which.panel, var.name, 
@@ -441,7 +512,7 @@ strip.math <- function(which.given, which.panel, var.name,
 }
 
 
-
+## Figure 8
 useOuterStrips(
   levelplot(corr~row*col|scale + level, data=wavCorDF,
             xlab='', ylab='', scales=list(draw=FALSE),
@@ -449,13 +520,14 @@ useOuterStrips(
   strip=strip.math)
 
 
-## Matriz de correlación-distancia
+## Matrix of correlation-distance
 corDistLong <- rbind(
                  cbind(corDistLongLow[,c('distances', 'scale', 'correlation')], level='Low'),
                  cbind(corDistLongMed[,c('distances', 'scale', 'correlation')], level='Med'),
                  cbind(corDistLongHigh[,c('distances', 'scale', 'correlation')], level='High')
                  )
 
+## Figure 9 (without exponential model)
 useOuterStrips(
   xyplot(correlation~distances|scale*level, data=corDistLong,
          type=c('p', 'smooth'), auto.key=list(space='right'), ylab='',
@@ -470,7 +542,7 @@ useOuterStrips(
 ## EXPONENTIAL MODEL
 ################################################################################
 
-### Adaptado de páginas 32 y ss. de Libro "Nonlinear regression with R"
+### pp. 32 y ss. de Libro "Nonlinear regression with R"
 expModel <- function(predictor, a, b, c) a + b * exp(-predictor/c)
 
 expModelInit <- function(mCall,LHS, data) {
@@ -488,6 +560,7 @@ expModelInit <- function(mCall,LHS, data) {
 
 SSexp <- selfStart(expModel, expModelInit, c("a", "b", "c"))
 
+## Nonlinear regression function with multiple models
 fooNLS <- function(data){
   control <- nls.control(warnOnly=TRUE)
   modelAsymp <- try(nls(correlation ~ SSasymp(distances, Asym, R0, lrc), data=data, control=control))
@@ -501,6 +574,7 @@ fooNLS <- function(data){
 corList <- split(corDistLong, corDistLong[,c('scale', 'level')])
 nlsFull <- lapply(corList, fooNLS)
 
+## Coefficients for each model
 coefs <- lapply(nlsFull, function(x){
   if (is.null(x)) {
     coefs <- rep(NA, 4)
@@ -540,17 +614,23 @@ coefs$valid <- c(FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE, FALSE,
                  FALSE, TRUE, TRUE, TRUE, FALSE, FALSE, FALSE, FALSE, FALSE,
                  FALSE, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, FALSE)
 
-scaleLabs <- mathLabs(coefs$scale[coefs$valid])
+scaleLabs <- mathLabs(unique(coefs$scale[coefs$valid]))
+coefs$level <- factor(coefs$level, levels=c('Low', 'High', 'Med'))
 
+## Figure 10
+trellis.device(pdf, file='range.pdf')
 xyplot(log(c)~scale, groups=level, data=coefs, subset=valid,
        ylab='Logarithm of the range factor',
        xlab='Wavelet scale',
        scales=list(x=list(labels=eval(parse(text=scaleLabs)))),
-       type=c('p', 'r', 'g'), auto.key=list(space='right'))
+       type=c('p', 'r', 'g'),
+       auto.key = list(x = .8, y = .1))
+dev.off()
 
+
+## Figure 9
 predFull <- lapply(nlsFull, function(x)if(is.null(x)) rep(NA, 2415) else predict(x))
 corDistLong$pred <- do.call(c, predFull)
-
 useOuterStrips(xyplot(correlation+pred~distances|scale*level,
                       data=corDistLong[order(corDistLong$distances),],
                       type=c('p', 'l'), distribute.type=TRUE, ylab='',
